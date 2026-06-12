@@ -1,0 +1,34 @@
+{
+  "stops": [
+    {
+      "name": "",
+      "address": "320 E Boston Blvd, Detroit, MI 48202",
+      "lon": -83.0805779,
+      "lat": 42.3889637
+    },
+    {
+      "name": "test2",
+      "address": "1207 Atkinson St, Detroit, MI 48202",
+      "lon": -83.0925983,
+      "lat": 42.3798613
+    },
+    {
+      "name": "test3",
+      "address": "2257 E Canfield St, Detroit, MI 48207",
+      "lon": -83.0396926,
+      "lat": 42.3609978
+    },
+    {
+      "name": "test4",
+      "address": "2025 Edwin St, Hamtramck, MI 48212",
+      "lon": -83.0643832,
+      "lat": 42.3941425
+    },
+    {
+      "name": "test5",
+      "address": "3334 Theodore St, Detroit, MI 48211",
+      "lon": -83.0341262,
+      "lat": 42.3689225
+    }
+  ]
+}

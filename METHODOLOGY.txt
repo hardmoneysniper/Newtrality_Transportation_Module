@@ -1,0 +1,125 @@
+METHODOLOGY
+===========
+
+Overview
+
+This project quantifies the environmental benefit of consolidating food deliveries from
+dispersed community kitchens and urban farms across Metro Detroit into a single shared
+logistics model centered on Detroit's Eastern Market. By modeling both the current
+scenario -- where each vendor makes individual trips -- and a proposed consolidated
+routing scenario, we can measure the reduction in total vehicle distance traveled and,
+by extension, carbon emissions.
+
+
+Step 1: Vendor Data Preparation
+
+The pipeline begins with a spreadsheet of 20 sample vendor locations -- community kitchens,
+incubator spaces, and shared cooking facilities spread across Metro Detroit, from
+Ypsilanti and Belleville in the southwest to Rochester and Pontiac in the north, and
+Grosse Pointe in the east.
+
+A custom Python script (csvtransformer.py) parses the vendor spreadsheet and normalizes
+each entry into a structured format containing a vendor name and a full postal address.
+It handles messy real-world spreadsheet data: inconsistent column names, mixed
+encodings, and address fields spread across multiple columns. The output is a clean JSON
+file of stops ready for geocoding.
+
+
+Step 2: Geocoding
+
+Addresses are converted to geographic coordinates (latitude/longitude) using
+geocode_stops.py. The script queries a geocoding API -- by default OpenStreetMap's
+Nominatim service -- for any stop that lacks pre-existing coordinates. Results are
+cached locally so repeated runs do not re-query the API. The output is a geocoded JSON
+file where every vendor has a verified longitude/latitude pair.
+
+
+Step 3: Building the Road Network
+
+Rather than using straight-line ("as-the-crow-flies") distances, this project routes
+vehicles on real roads. build_network_osm.py downloads the complete drivable road
+network for Metro Detroit from OpenStreetMap using the osmnx library. The network covers
+a bounding box from Ann Arbor to Port Huron and is stored as a directed graph
+(respecting one-way streets) with:
+
+  - 185,211 intersections (nodes)
+  - 267,744 road segments (edges), each tagged with a real-world length in meters
+
+This graph is serialized to a GraphML file and reused across all subsequent routing
+steps without re-downloading.
+
+
+Step 4: Individual Baseline -- Every Vendor Drives Alone
+
+vendor_each_distance.py establishes the baseline scenario: what if every vendor drove
+their own vehicle directly to Eastern Market? It uses the OpenRouteService API to
+calculate the road-network distance and drive time from each of the 20 vendor locations
+to Eastern Market individually. This gives the total distance and time the current
+system requires if no consolidation happens.
+
+
+Step 5: Clustered Delivery Routing -- The Optimization
+
+tsp_routing_with_clustering.py models the proposed consolidated scenario using two
+techniques.
+
+Geographic Clustering
+
+The 20 vendor locations are grouped into clusters of nearby stops using k-means
+clustering on their coordinates. The project uses 4 clusters, representing 4 delivery
+trucks operating concurrently. Vendors in the same cluster are geographically proximate,
+so one truck can efficiently visit all of them in a single loop. A fallback "sweep"
+algorithm groups vendors by their compass angle relative to Eastern Market when k-means
+is unavailable.
+
+Traveling Salesman Problem (TSP) per Cluster
+
+For each cluster, the script solves the classic Traveling Salesman Problem: starting
+from Eastern Market, visit every vendor in the cluster exactly once, then return to
+Eastern Market -- in the order that minimizes total driving distance. Distances between
+stops are computed using Dijkstra's shortest-path algorithm on the directed OSM road
+graph, so they reflect real driving distances, including one-way streets.
+
+  - For clusters with 10 or fewer stops: exact brute-force search over all possible
+    orderings (up to 10! = 3,628,800 permutations)
+  - For larger clusters: a 2-opt heuristic that iteratively reverses sub-sequences of
+    the route until no improvement is found
+
+Each cluster's optimal route is saved as a GeoPackage (.gpkg) spatial file containing
+the full road geometry of the route, segment-by-segment distances, and the ordered stop
+sequence.
+
+
+Step 6: Results
+
+The four optimized delivery clusters and their routes:
+
+  Cluster 01 -- 4 stops -- Ypsilanti, Plymouth, Belleville -- 131.7 km
+  Cluster 02 -- 6 stops -- East Detroit, Hamtramck, Grosse Pointe -- 44.1 km
+  Cluster 03 -- 2 stops -- Rochester, Pontiac -- 119.8 km
+  Cluster 04 -- 8 stops -- Northwest Detroit, Southfield, Oak Park, Berkley -- 90.1 km
+
+Combined fleet total: 385.6 km across 4 trucks (approximately 432 minutes of drive time)
+
+This is compared against the individual baseline -- the sum of all 20 vendors each
+making a solo round trip to Eastern Market -- to calculate the distance saved and the
+reduction in vehicle trips (from 20 separate vehicles to 4).
+
+
+Step 7: Visualization
+
+make_cluster_vs_individual_maps.py produces two Shapefiles: one showing all four
+clustered truck routes (each cluster in a distinct color), and one showing the 20
+individual vendor-to-market routes. These layers are loaded into an interactive web map
+so the visual difference between the fragmented individual model and the consolidated
+routing model can be directly compared.
+
+
+Tools and Libraries
+
+  osmnx               -- Download and manage the OSM road network
+  networkx            -- Dijkstra shortest-path on the road graph
+  geopandas/shapely   -- Spatial data handling and route geometry
+  scikit-learn        -- K-means geographic clustering
+  geopy               -- Address geocoding
+  openrouteservice    -- Turn-by-turn routing for individual baseline

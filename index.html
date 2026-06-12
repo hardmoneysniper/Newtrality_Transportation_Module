@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Eastern Market – Clustered Routing (ORS)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+<header>
+  <h1>Eastern Market – Fleet Routing</h1>
+  <div class="controls">
+    <label for="trucks" class="small">Trucks</label>
+    <input id="trucks" type="number" min="1" value="5"/>
+    <button id="runBtn">Run routing</button>
+  </div>
+</header>
+<main>
+  <aside id="sidebar">
+    <div class="panel">
+      <div class="small">JSON: <span class="mono">stops_from_vendors_geocoded.json</span></div>
+      <div class="small">Defaults: <span class="mono">--out out_clusters --method auto --opt_metric duration --preference fastest</span></div>
+    </div>
+    <div class="panel">
+      <div class="small">Status</div>
+      <div id="status" class="mono" style="white-space:pre-wrap; margin-top:6px; color:#a9b5c1;">idle</div>
+    </div>
+    <div class="panel">
+      <div class="small">Legend</div>
+      <div id="legend" class="legend"></div>
+    </div>
+    <div class="panel">
+      <div class="small">Impact vs individual vendor trips</div>
+      <div id="impact"></div>
+    </div>
+    <div id="clusters"></div>
+  </aside>
+  <div id="map"></div>
+</main>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const map = L.map('map', {zoomControl:true}).setView([42.36, -83.06], 10);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OSM' }).addTo(map);
+
+const colors = ["#ff6b6b","#4dabf7","#51cf66","#ffd43b","#b197fc","#63e6be","#ffa94d","#69db7c","#74c0fc","#ff8787"];
+const clusterLayers = {};
+const legend = document.getElementById('legend');
+const clustersDiv = document.getElementById('clusters');
+const statusEl = document.getElementById('status');
+const impactEl = document.getElementById('impact');
+const runBtn = document.getElementById('runBtn');
+
+function colorFor(idx){ return colors[idx % colors.length]; }
+
+function clearMap() {
+  Object.values(clusterLayers).forEach(g => map.removeLayer(g));
+  for (const k of Object.keys(clusterLayers)) delete clusterLayers[k];
+  legend.innerHTML = "";
+  clustersDiv.innerHTML = "";
+  impactEl.innerHTML = "";
+}
+
+function addLegendItem(name, color){
+  const span = document.createElement('div');
+  span.className = 'small';
+  span.innerHTML = `<span class="swatch" style="background:${color}"></span>${name}`;
+  legend.appendChild(span);
+}
+
+function drawCluster(idx, c) {
+  const color = colorFor(idx);
+  const group = L.layerGroup().addTo(map);
+  clusterLayers[c.cluster] = group;
+
+  // route
+  const route = L.geoJSON(c.route, {
+    style: { color, weight: 5, opacity: 0.9 }
+  }).addTo(group);
+
+  // legs
+  const legs = L.geoJSON(c.route_legs, {
+    style: { color, weight: 2, opacity: 0.6, dashArray: "6 6" }
+  }).addTo(group);
+
+  // stops (ordered)
+  const stops = L.geoJSON(c.stops_ordered, {
+    pointToLayer: (feat, latlng) => L.circleMarker(latlng, {
+      radius: 6, weight: 2, color: "#000", fillColor: color, fillOpacity: 0.9
+    }),
+    onEachFeature: (feat, layer) => {
+      const name = feat.properties.name || "Stop";
+      const idx  = feat.properties.visit_idx;
+      layer.bindTooltip(`#${idx} · ${name}`, {permanent:false, direction:'top'});
+    }
+  }).addTo(group);
+
+  // sidebar card
+  const card = document.createElement('div');
+  card.className = 'clusterCard';
+  const km = (c.summary.total_km ?? 0).toFixed(2);
+  const min = (c.summary.total_min ?? 0).toFixed(1);
+  const order = (c.summary.order || "").split(">").map(s => s.trim()).filter(Boolean);
+  card.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+      <div><span class="badge">${c.cluster}</span></div>
+      <div class="small mono" style="color:${color}">${c.summary.preference} • ${c.summary.metric}</div>
+    </div>
+    <div class="row"><span>Total distance</span><span class="mono">${km} km</span></div>
+    <div class="row"><span>Total time</span><span class="mono">${min} min</span></div>
+    <div class="row"><span>Return to depot</span><span class="mono">${c.summary.return_to_depot ? "yes" : "no"}</span></div>
+    <div class="small" style="margin-top:8px">Order:</div>
+    <div class="mono small" style="white-space:pre-wrap">${order.join(" → ")}</div>
+  `;
+  clustersDiv.appendChild(card);
+
+  // legend item
+  addLegendItem(c.cluster, color);
+
+  // fit map
+  const bounds = route.getBounds().isValid()
+    ? route.getBounds().pad(0.1)
+    : stops.getBounds().pad(0.1);
+  map.fitBounds(bounds);
+}
+
+/* ---- impact helpers ---- */
+function fmtKm(x) {
+  if (x == null || isNaN(x)) return "–";
+  return x.toFixed(1) + " km";
+}
+
+// values show kg / t only (no “CO₂e” here)
+function fmtKg(x) {
+  if (x == null || isNaN(x)) return "–";
+  if (x >= 1000) return (x/1000).toFixed(2) + " t";
+  return x.toFixed(1) + " kg";
+}
+
+function renderImpact(metrics) {
+  if (!metrics) {
+    impactEl.innerHTML = '<div class="small">No metrics available.</div>';
+    return;
+  }
+  const origKm = metrics.original_km || 0;
+  const curKm  = metrics.current_km || 0;
+  const dKm    = metrics.delta_km || 0;
+
+  const origDiesel = metrics.original_kgco2e_diesel || 0;
+  const curDiesel  = metrics.current_kgco2e_diesel || 0;
+  const dDiesel    = metrics.delta_kgco2e_diesel || 0;
+
+  const origElec = metrics.original_kgco2e_electric || 0;
+  const curElec  = metrics.current_kgco2e_electric || 0;
+  const dElec    = metrics.delta_kgco2e_electric || 0;
+
+  const distClass = dKm >= 0 ? "impactPositive" : "impactNegative";
+  const distLabel = dKm >= 0 ? "Saved" : "Extra";
+
+  const dieselClass = dDiesel >= 0 ? "impactPositive" : "impactNegative";
+  const dieselLabel = dDiesel >= 0 ? "Saved" : "Extra";
+
+  const elecClass = dElec >= 0 ? "impactPositive" : "impactNegative";
+  const elecLabel = dElec >= 0 ? "Saved" : "Extra";
+
+  impactEl.innerHTML = `
+    <div class="impactRow">
+      <div class="impactLabel">Distance (Individual vs. Clustered Deliveries)</div>
+      <div class="impactColumns">
+        <div class="impactCol">
+          <div class="impactColTitle">Original</div>
+          <div class="impactColValue mono">${fmtKm(origKm)}</div>
+        </div>
+        <div class="impactCol">
+          <div class="impactColTitle">Current</div>
+          <div class="impactColValue mono">${fmtKm(curKm)}</div>
+        </div>
+        <div class="impactCol">
+          <div class="impactColTitle">${distLabel}</div>
+          <div class="impactColValue mono ${distClass}">${fmtKm(Math.abs(dKm))}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="impactRow">
+      <div class="impactLabel">CARBON FOOTPRINT (DIESEL)</div>
+      <div class="impactColumns">
+        <div class="impactCol">
+          <div class="impactColTitle">Original (CO₂e)</div>
+          <div class="impactColValue mono">${fmtKg(origDiesel)}</div>
+        </div>
+        <div class="impactCol">
+          <div class="impactColTitle">Current (CO₂e)</div>
+          <div class="impactColValue mono">${fmtKg(curDiesel)}</div>
+        </div>
+        <div class="impactCol">
+          <div class="impactColTitle">${dieselLabel} (CO₂e)</div>
+          <div class="impactColValue mono ${dieselClass}">${fmtKg(Math.abs(dDiesel))}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="impactRow">
+      <div class="impactLabel">CARBON FOOTPRINT (ELECTRIC)</div>
+      <div class="impactColumns">
+        <div class="impactCol">
+          <div class="impactColTitle">Original (CO₂e)</div>
+          <div class="impactColValue mono">${fmtKg(origElec)}</div>
+        </div>
+        <div class="impactCol">
+          <div class="impactColTitle">Current (CO₂e)</div>
+          <div class="impactColValue mono">${fmtKg(curElec)}</div>
+        </div>
+        <div class="impactCol">
+          <div class="impactColTitle">${elecLabel} (CO₂e)</div>
+          <div class="impactColValue mono ${elecClass}">${fmtKg(Math.abs(dElec))}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="small" style="margin-top:6px;color:#8b949e;">
+      Original scenario: ${metrics.n_vendors || "?"} Vendors travel individually.
+      Current scenario: ${metrics.n_clusters || "?"} clustered EM truck route(s).
+    </div>
+  `;
+}
+
+/* ---- main run button ---- */
+async function runRouting() {
+  const trucks = parseInt(document.getElementById('trucks').value || "5", 10);
+  runBtn.disabled = true; statusEl.textContent = "running…";
+  try {
+    const resp = await fetch("/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ trucks })
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+    const data = await resp.json();
+    clearMap();
+    (data.clusters || []).forEach((c, i) => { if(!c.error) drawCluster(i, c); });
+    renderImpact(data.metrics);
+    statusEl.textContent = "done";
+    console.log(data.stdout || "");
+  } catch (e) {
+    statusEl.textContent = "error: " + (e.message || e);
+  } finally {
+    runBtn.disabled = false;
+  }
+}
+
+runBtn.addEventListener('click', runRouting);
+</script>
+</body>
+</html>

@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Eastern Market – Before vs After Map</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <link rel="stylesheet" href="/map_style.css"/>
+</head>
+<body>
+<header>
+  <h1>Eastern Market – Individual vs Clustered Routes</h1>
+</header>
+<main>
+  <aside id="sidebar">
+    <section class="panel">
+      <h2>Layers</h2>
+      <p class="small">Use the map control (top-right) to toggle:</p>
+      <ul class="small">
+        <li><strong>Clustered routes</strong> – EM truck routes (per cluster color)</li>
+        <li><strong>Individual routes</strong> – each vendor drives to EM</li>
+        <li><strong>Overlap – clustered</strong> – thicker where more clustered routes share a road</li>
+        <li><strong>Overlap – individual</strong> – thicker where more individual routes share a road</li>
+      </ul>
+    </section>
+
+    <section class="panel">
+      <h2>Cluster Legend</h2>
+      <div id="cluster-legend" class="legend small"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Notes</h2>
+      <p class="small">
+        Base line width is the same as the routes (5 px). Each additional overlapping
+        route makes the white overlap lines noticeably thicker, so you can see where
+        traffic concentrates in the original vendor network vs the EM truck network.
+      </p>
+    </section>
+  </aside>
+
+  <div id="map"></div>
+</main>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const map = L.map('map', { zoomControl:true }).setView([42.36, -83.06], 10);
+
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+  maxZoom: 19,
+  attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+}).addTo(map);
+const EM_LAT = 42.3469;
+const EM_LON = -83.0416;
+
+// Marker for Eastern Market
+L.circleMarker([EM_LAT, EM_LON], {
+  radius: 7,
+  weight: 2,
+  color: '#ffffff',
+  fillColor: '#000000',
+  fillOpacity: 1.0
+}).addTo(map).bindTooltip("Eastern Market", {direction:'top'});
+
+// Layers
+let clusteredLayer = null;
+let individualLayer = null;
+let intensityClusteredLayer = null;
+let intensityIndividualLayer = null;
+let globalBounds = null;
+const layersControl = L.control.layers(null, null, { collapsed: false }).addTo(map);
+
+// Legend container
+const clusterLegend = document.getElementById('cluster-legend');
+
+function extendBounds(layer) {
+  const lb = layer.getBounds();
+  if (!lb.isValid()) return;
+  if (!globalBounds) {
+    globalBounds = lb;
+  } else {
+    globalBounds.extend(lb);
+  }
+  map.fitBounds(globalBounds.pad(0.1));
+}
+
+function addClusterLegend(clusterColors) {
+  clusterLegend.innerHTML = "";
+  const entries = Object.entries(clusterColors);
+  if (!entries.length) {
+    clusterLegend.innerHTML = "<div class='small'>No cluster data loaded.</div>";
+    return;
+  }
+  entries.forEach(([cluster, color]) => {
+    const row = document.createElement('div');
+    row.className = "legend-row";
+    row.innerHTML = `
+      <span class="swatch" style="background:${color};"></span>
+      <span>${cluster}</span>
+    `;
+    clusterLegend.appendChild(row);
+  });
+}
+
+// ---- Clustered routes layer (color by cluster, width 5) ----
+fetch("/data/clustered")
+  .then(r => r.json())
+  .then(data => {
+    const clusterColors = {};
+    clusteredLayer = L.geoJSON(data, {
+      style: function(feat) {
+        const c = feat.properties && feat.properties.color_hex ? feat.properties.color_hex : "#ff0000";
+        const cl = feat.properties && feat.properties.cluster ? feat.properties.cluster : "";
+        if (cl && !(cl in clusterColors)) {
+          clusterColors[cl] = c;
+        }
+        return {
+          color: c,
+          weight: 5,
+          opacity: 0.9
+        };
+      }
+    });
+
+    clusteredLayer.addTo(map);
+    layersControl.addOverlay(clusteredLayer, "Clustered routes");
+    extendBounds(clusteredLayer);
+    addClusterLegend(clusterColors);
+  })
+  .catch(err => {
+    console.error("Error loading clustered data:", err);
+    clusterLegend.innerHTML = "<div class='small'>Error loading clustered routes.</div>";
+  });
+
+// ---- Individual routes layer (color by vendor, width 5) ----
+fetch("/data/individual")
+  .then(r => r.json())
+  .then(data => {
+    individualLayer = L.geoJSON(data, {
+      style: function(feat) {
+        const c = feat.properties && feat.properties.color_hex ? feat.properties.color_hex : "#888888";
+        return {
+          color: c,
+          weight: 5,   // same base thickness as clustered
+          opacity: 0.7
+        };
+      },
+      onEachFeature: function(feat, layer) {
+        if (!feat.properties) return;
+        const name = feat.properties.name || "Vendor";
+        const km = feat.properties.distance_km != null ? feat.properties.distance_km.toFixed(1) + " km" : "";
+        const min = feat.properties.duration_min != null ? feat.properties.duration_min.toFixed(1) + " min" : "";
+        const content = `<b>${name}</b><br>${km}<br>${min}`;
+        layer.bindTooltip(content, {direction:'top'});
+      }
+    });
+
+    layersControl.addOverlay(individualLayer, "Individual routes");
+    extendBounds(individualLayer);
+  })
+  .catch(err => {
+    console.error("Error loading individual data:", err);
+  });
+
+// ---- Overlap – clustered routes only (white, thicker with more overlap) ----
+fetch("/data/intensity_clustered")
+  .then(r => r.json())
+  .then(data => {
+    intensityClusteredLayer = L.geoJSON(data, {
+      style: function(feat) {
+        const c = feat.properties && typeof feat.properties.count === "number"
+          ? feat.properties.count : 1;
+
+        // Base thickness = 5 (same as routes).
+        // Each extra overlapping route adds +4, capped so it doesn't get crazy.
+        let w = 5 + (c - 1) * 4;
+        if (w < 5)  w = 5;
+        if (w > 24) w = 24;
+
+        return {
+          color: "#ffffff",   // white overlap
+          weight: w,
+          opacity: 0.9
+        };
+      },
+      onEachFeature: function(feat, layer) {
+        if (!feat.properties) return;
+        const c = feat.properties.count || 1;
+        layer.bindTooltip(`${c} clustered route(s) use this segment`, {direction:'top'});
+      }
+    });
+
+    layersControl.addOverlay(intensityClusteredLayer, "Overlap – clustered (white)");
+    extendBounds(intensityClusteredLayer);
+  })
+  .catch(err => {
+    console.error("Error loading clustered intensity data:", err);
+  });
+
+// ---- Overlap – individual routes only (white, thicker with more overlap) ----
+fetch("/data/intensity_individual")
+  .then(r => r.json())
+  .then(data => {
+    intensityIndividualLayer = L.geoJSON(data, {
+      style: function(feat) {
+        const c = feat.properties && typeof feat.properties.count === "number"
+          ? feat.properties.count : 1;
+
+        let w = 5 + (c - 1) * 4;
+        if (w < 5)  w = 5;
+        if (w > 24) w = 24;
+
+        return {
+          color: "#ffffff",   // white overlap
+          weight: w,
+          opacity: 0.9
+        };
+      },
+      onEachFeature: function(feat, layer) {
+        if (!feat.properties) return;
+        const c = feat.properties.count || 1;
+        layer.bindTooltip(`${c} individual route(s) use this segment`, {direction:'top'});
+      }
+    });
+
+    layersControl.addOverlay(intensityIndividualLayer, "Overlap – individual (white)");
+    extendBounds(intensityIndividualLayer);
+  })
+  .catch(err => {
+    console.error("Error loading individual intensity data:", err);
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+cluster,n_stops,total_m,total_km,total_s,total_min,order,fleet_total_km,fleet_total_min
+cluster_01,4,131680.4,131.6804,7985.9,133.09833333333333,Eastern Market>Proud Mitten Shared Kitchen>Rosie's Community Kitchen>Growing Hope Incubator Kitchen>149 South Street>Eastern Market,385.61359999999996,432.70000000000005
+cluster_02,6,44067.49999999999,44.067499999999995,4346.8,72.44666666666667,Eastern Market>Authority Health Community Kitchen>Christ Church Commons>East Warren Development Corporation Shared Kitchen>One New Humanity>Detroit Food Commons>Eastern Market Shed 5 Kitchen>Eastern Market,385.61359999999996,432.70000000000005
+cluster_03,2,119796.2,119.7962,6759.8,112.66333333333334,Eastern Market>The FlavorLab Culinary Collective>HOPE Kitchen>Eastern Market,385.61359999999996,432.70000000000005
+cluster_04,8,90069.5,90.0695,6869.500000000001,114.49166666666669,Eastern Market>St. John's Episcopal Church>Fresh Collective Kitchen & Market>The Culinary Studio>Capital Kitchen>The D Loft Commercial Kitchen>Fellowship Chapel Community Kitchen>Rosedale Park Community Kitchen>Brightmoor Artisans Collective>Eastern Market,385.61359999999996,432.70000000000005

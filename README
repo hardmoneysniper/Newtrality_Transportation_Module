@@ -1,0 +1,6 @@
+1. Build the network
+2. Prepare stops json
+3. Geocode (adds missing coords and writes the unified 4-field JSON):
+    python geocode_stops.py --in_json stops_raw.json --out_json stops_geocoded.json
+4. Routing
+    python tsp_routes_from_coords.py --graphml net_em/network.graphml --json stops_geocoded.json --out out_em

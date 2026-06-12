@@ -1,0 +1,124 @@
+{
+  "stops": [
+    {
+      "name": "Eastern Market Shed 5 Kitchen",
+      "address": "2934 Russell St, Detroit, MI 48207",
+      "lon": -83.0418753,
+      "lat": 42.3490442
+    },
+    {
+      "name": "Brightmoor Artisans Collective",
+      "address": "22735 Fenkell St, Detroit, MI 48223",
+      "lon": -83.2661886,
+      "lat": 42.3999458
+    },
+    {
+      "name": "Authority Health Community Kitchen",
+      "address": "10809 Mack Ave, Detroit, MI 48214",
+      "lon": -82.9836839,
+      "lat": 42.3770965
+    },
+    {
+      "name": "Fellowship Chapel Community Kitchen",
+      "address": "7707 W Outer Dr, Detroit, MI 48235",
+      "lon": -83.2119226,
+      "lat": 42.4184954
+    },
+    {
+      "name": "The D Loft Commercial Kitchen",
+      "address": "20449 Schaefer Hwy, Detroit, MI 48235",
+      "lon": -83.1810648,
+      "lat": 42.4436164
+    },
+    {
+      "name": "The Culinary Studio",
+      "address": "29673 Northwestern Hwy, Southfield, MI 48034",
+      "lon": -83.3147737,
+      "lat": 42.5046106
+    },
+    {
+      "name": "Rosie's Community Kitchen",
+      "address": "235 Spencer Ln, Ypsilanti, MI 48198",
+      "lon": -83.569758,
+      "lat": 42.252312
+    },
+    {
+      "name": "Fresh Collective Kitchen & Market",
+      "address": "2752 Coolidge Hwy, Berkley, MI 48072",
+      "lon": -83.1835999,
+      "lat": 42.4975085
+    },
+    {
+      "name": "Growing Hope Incubator Kitchen",
+      "address": "922 Michigan Ave, Ypsilanti, MI 48197",
+      "lon": -83.6258402,
+      "lat": 42.2377066
+    },
+    {
+      "name": "Proud Mitten Shared Kitchen",
+      "address": "650 Church St, Plymouth, MI 48170",
+      "lon": -83.4682101,
+      "lat": 42.3743504
+    },
+    {
+      "name": "Rosedale Park Community Kitchen",
+      "address": "18445 Scarsdale St, Detroit, MI 48223",
+      "lon": -83.2232219,
+      "lat": 42.4072753
+    },
+    {
+      "name": "Capital Kitchen",
+      "address": "12930 Capital St, Oak Park, MI 48237",
+      "lon": -83.1804758,
+      "lat": 42.4549721
+    },
+    {
+      "name": "The FlavorLab Culinary Collective",
+      "address": "812 N Main St, Rochester, MI 48307",
+      "lon": -83.1339253,
+      "lat": 42.6870798
+    },
+    {
+      "name": "Christ Church Commons",
+      "address": "61 Grosse Pointe Blvd, Grosse Pointe Farms, MI 48236",
+      "lon": -82.900904,
+      "lat": 42.3915044
+    },
+    {
+      "name": "Detroit Food Commons",
+      "address": "8324 Woodward Ave, Detroit, MI 48202",
+      "lon": -83.0773687,
+      "lat": 42.3771475
+    },
+    {
+      "name": "St. John's Episcopal Church",
+      "address": "26998 Woodward Ave, Royal Oak, MI 48067",
+      "lon": -83.1576439,
+      "lat": 42.4890913
+    },
+    {
+      "name": "One New Humanity",
+      "address": "10218 Joseph Campau St, Hamtramck, MI 48212",
+      "lon": -83.0589394,
+      "lat": 42.3986844
+    },
+    {
+      "name": "149 South Street",
+      "address": "149 South St, Belleville, MI 48111",
+      "lon": -83.4850506,
+      "lat": 42.2032301
+    },
+    {
+      "name": "HOPE Kitchen",
+      "address": "20 E Walton Blvd, Pontiac, MI 48340",
+      "lon": -83.2994235,
+      "lat": 42.6765317
+    },
+    {
+      "name": "East Warren Development Corporation Shared Kitchen",
+      "address": "16835 E Warren Ave, Detroit, MI 48224",
+      "lon": -82.9325845,
+      "lat": 42.4053357
+    }
+  ]
+}

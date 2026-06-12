@@ -1,0 +1,12 @@
+{
+  "network_type": "drive",
+  "simplify": true,
+  "n_nodes": 185211,
+  "n_edges": 267744,
+  "aoi_bounds": [
+    -83.953857,
+    41.940127,
+    -82.805786,
+    43.190201
+  ]
+}

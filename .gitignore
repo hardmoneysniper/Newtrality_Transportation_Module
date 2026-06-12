@@ -1,0 +1,10 @@
+# OSM network — large generated files (re-build with build_network_osm.py)
+net_em/network.graphml
+net_em/network_edges.gpkg
+net_em/network_nodes.gpkg
+net_em/_ox_cache/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
