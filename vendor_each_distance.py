@@ -2,8 +2,6 @@ import json, os
 import pandas as pd
 import openrouteservice as ors
 
-ORS_HARDCODED_KEY = "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjNiMjA0NmE5Mzc1NDQxZmViNjUwYTUwN2VjYzYwZTA1IiwiaCI6Im11cm11cjY0In0="
-
 # Eastern Market (depot) – fixed coords
 EM_NAME = "Eastern Market"
 EM_LON = -83.0416
@@ -23,9 +21,9 @@ def main():
     vendors = [{"name": s["name"], "lon": float(s["lon"]), "lat": float(s["lat"])} for s in stops]
 
     # Build ORS client
-    key = os.environ.get("ORS_API_KEY") or ORS_HARDCODED_KEY
-    if not key or key == "YOUR_ORS_KEY_HERE":
-        raise RuntimeError("Missing ORS key. Set ORS_HARDCODED_KEY or env ORS_API_KEY.")
+    key = os.environ.get("ORS_API_KEY")
+    if not key:
+        raise RuntimeError("Missing ORS key. Set the ORS_API_KEY env var.")
     client = ors.Client(key=key, timeout=120)
 
     # Locations: index 0 is Eastern Market, then all vendors

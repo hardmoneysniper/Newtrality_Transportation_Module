@@ -1,0 +1,19 @@
+.git
+.gitignore
+
+# OSM network graph + cache — 550MB+, only used by the local-networkx
+# CLI scripts (tsp_routing_with_clustering.py / tsp_routing_from_coords.py /
+# build_network_osm.py), not by server.py's ORS-based /run path.
+net_em/
+
+# Generated per-run outputs — recreated at runtime, not needed in the image
+out_clusters/
+out_em/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Editor/tooling
+.claude/

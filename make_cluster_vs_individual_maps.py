@@ -33,8 +33,10 @@ import openrouteservice as ors
 
 # ========= CONFIG YOU CAN EDIT =========
 
-# 1) Your OpenRouteService API key (insert your real key here)
-ORS_API_KEY = "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjNiMjA0NmE5Mzc1NDQxZmViNjUwYTUwN2VjYzYwZTA1IiwiaCI6Im11cm11cjY0In0="
+import os
+
+# 1) Your OpenRouteService API key (set via ORS_API_KEY env var)
+ORS_API_KEY = os.environ.get("ORS_API_KEY")
 
 # 2) Input paths (relative to this script)
 JSON_PATH = Path("stops_from_vendors_geocoded.json")

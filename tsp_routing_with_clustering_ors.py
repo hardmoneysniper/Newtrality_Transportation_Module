@@ -1,4 +1,4 @@
-import os, json, argparse, math, itertools, time, sys, importlib
+import os, json, argparse, math, sys, importlib
 import pandas as pd
 import geopandas as gpd
 from shapely.ops import unary_union, linemerge
@@ -7,7 +7,9 @@ from shapely.geometry import LineString
 # --- ORS ---
 import openrouteservice as ors
 
-ORS_HARDCODED_KEY = "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjNiMjA0NmE5Mzc1NDQxZmViNjUwYTUwN2VjYzYwZTA1IiwiaCI6Im11cm11cjY0In0="
+# --- OR-Tools (TSP solver) ---
+import numpy as np
+from ortools.constraint_solver import routing_enums_pb2, pywrapcp
 
 # Eastern Market depot (constant)
 EM_NAME = "Eastern Market"
@@ -75,10 +77,10 @@ def cluster_kmeans(farms_df, k, random_state=42):
 
 # ---------- ORS Matrix + Directions ----------
 def build_ors_client(ors_key=None, base_url=None, timeout=120):
-    # Priority: CLI arg > env var > hardcoded
-    key = ors_key or os.environ.get("ORS_API_KEY") or ORS_HARDCODED_KEY
-    if not key or key == "YOUR_ORS_KEY_HERE":
-        raise RuntimeError("Missing ORS API key. Pass --ors_key, set ORS_API_KEY, or edit ORS_HARDCODED_KEY.")
+    # Priority: CLI arg > env var
+    key = ors_key or os.environ.get("ORS_API_KEY")
+    if not key:
+        raise RuntimeError("Missing ORS API key. Pass --ors_key or set the ORS_API_KEY env var.")
     return ors.Client(key=key, base_url=base_url or "https://api.openrouteservice.org", timeout=timeout)
 
 
@@ -103,9 +105,17 @@ def full_matrix_ors(client, coords, profile="driving-car", metrics=("duration","
     return out
 
 
-def ors_leg_geojson(client, a, b, profile="driving-car", preference="fastest", extra_options=None, units="m"):
+def ors_route_legs_geojson(client, ordered_coords, ordered_names, profile="driving-car",
+                            preference="fastest", extra_options=None, units="m"):
+    """
+    Fetch the whole visit-ordered route in a single ORS Directions call (instead of
+    one call per leg) by passing every stop as a waypoint. ORS returns one "segment"
+    per leg (with its own distance/duration) plus the full route geometry; we slice
+    that geometry per leg using each segment's step way_points.
+    Returns (legs_gdf, total_m, total_s).
+    """
     r = client.directions(
-        coordinates=[a, b],
+        coordinates=ordered_coords,
         profile=profile,
         preference=preference,
         format="geojson",
@@ -113,54 +123,98 @@ def ors_leg_geojson(client, a, b, profile="driving-car", preference="fastest", e
         options=extra_options or {}
     )
     feat = r["features"][0]
-    geom = feat["geometry"]
-    summ = feat["properties"]["summary"]  # {"distance": m, "duration": s}
-    return geom, float(summ.get("distance", 0.0)), float(summ.get("duration", 0.0))
+    full_coords = feat["geometry"]["coordinates"]
+    props = feat["properties"]
+    summary = props["summary"]  # {"distance": m, "duration": s} for the whole route
+
+    rows = []
+    for leg_i, seg in enumerate(props["segments"], start=1):
+        steps = seg.get("steps") or []
+        if steps:
+            start_wp = min(s["way_points"][0] for s in steps)
+            end_wp = max(s["way_points"][1] for s in steps)
+        else:
+            start_wp, end_wp = 0, len(full_coords) - 1
+        leg_coords = full_coords[start_wp:end_wp + 1]
+        rows.append({
+            "leg_index": leg_i,
+            "from_name": ordered_names[leg_i - 1],
+            "to_name": ordered_names[leg_i],
+            "edge_m": float(seg.get("distance", 0.0)),
+            "edge_s": float(seg.get("duration", 0.0)),
+            "geometry": LineString(leg_coords),
+        })
+
+    legs_gdf = gpd.GeoDataFrame(rows, geometry="geometry", crs=4326)
+    return legs_gdf, float(summary.get("distance", 0.0)), float(summary.get("duration", 0.0))
 
 
-# ---------- TSP ----------
-def tsp_bruteforce(D, depot_idx, return_to_depot=True):
-    n = D.shape[0]
-    others = [i for i in range(n) if i != depot_idx]
-    best = None; order = None
-    for perm in itertools.permutations(others):
-        seq = [depot_idx] + list(perm)
-        if return_to_depot: seq += [depot_idx]
-        total = sum(D.iloc[a, b] for a, b in zip(seq[:-1], seq[1:]))
-        if best is None or total < best:
-            best, order = total, seq
-    return best, order
+# ---------- TSP (OR-Tools) ----------
+def tsp_ortools(D, depot_idx, return_to_depot=True, time_limit_s=5):
+    """
+    Solve the (open or closed) TSP over cost matrix D with Google OR-Tools'
+    routing solver (free, local, no external calls). Returns (total_cost, order_idx)
+    with order_idx a list of matrix indices, depot first and, if return_to_depot,
+    depot last too -- same contract as the old brute-force/2-opt helpers.
+    """
+    matrix = D.to_numpy(dtype=float) if hasattr(D, "to_numpy") else np.asarray(D, dtype=float)
+    n = matrix.shape[0]
+    if n <= 1:
+        return 0.0, [depot_idx]
 
+    scale = 1000.0  # keep sub-unit precision when rounding to the ints OR-Tools requires
+    cost = np.rint(matrix * scale).astype(int)
 
-def tsp_2opt(D, depot_idx, return_to_depot=True):
-    n = D.shape[0]
-    others = [i for i in range(n) if i != depot_idx]
-    # nearest-neighbor init
-    unv = set(others); route = [depot_idx]; cur = depot_idx
-    while unv:
-        nxt = min(unv, key=lambda j: D.iloc[cur, j]); route.append(nxt); unv.remove(nxt); cur = nxt
-    if return_to_depot: route.append(depot_idx)
-    def length(r): return sum(D.iloc[a,b] for a,b in zip(r[:-1], r[1:]))
-    best = route; best_len = length(route); improved = True
-    while improved:
-        improved = False
-        for i in range(1, len(best)-2):
-            for j in range(i+1, len(best)-1):
-                if j-i == 1: continue
-                cand = best[:i] + best[i:j][::-1] + best[j:]
-                L = length(cand)
-                if L < best_len - 1e-9:
-                    best, best_len, improved = cand, L, True
-                    break
-            if improved: break
-    return best_len, best
+    if return_to_depot:
+        manager = pywrapcp.RoutingIndexManager(n, 1, depot_idx)
+    else:
+        # Open path: add a dummy end node with 0-cost arcs from every real node
+        # so the route can terminate at whichever stop is cheapest, not just the depot.
+        dummy = n
+        padded = np.zeros((n + 1, n + 1), dtype=int)
+        padded[:n, :n] = cost
+        cost = padded
+        manager = pywrapcp.RoutingIndexManager(n + 1, 1, [depot_idx], [dummy])
+
+    routing = pywrapcp.RoutingModel(manager)
+
+    def distance_callback(from_index, to_index):
+        i, j = manager.IndexToNode(from_index), manager.IndexToNode(to_index)
+        return int(cost[i][j])
+
+    transit_idx = routing.RegisterTransitCallback(distance_callback)
+    routing.SetArcCostEvaluatorOfAllVehicles(transit_idx)
+
+    params = pywrapcp.DefaultRoutingSearchParameters()
+    params.first_solution_strategy = routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
+    # No metaheuristic: for these tiny per-cluster instances (a handful of stops),
+    # plain local search finds the optimum and returns immediately once it hits a
+    # local optimum, instead of a guided-local-search metaheuristic that deliberately
+    # keeps searching for the entire time_limit even when there's nothing left to gain.
+    params.time_limit.FromSeconds(time_limit_s)
+
+    solution = routing.SolveWithParameters(params)
+    if solution is None:
+        raise RuntimeError("OR-Tools found no solution for the TSP.")
+
+    order_idx = []
+    index = routing.Start(0)
+    while not routing.IsEnd(index):
+        order_idx.append(manager.IndexToNode(index))
+        index = solution.Value(routing.NextVar(index))
+    end_node = manager.IndexToNode(index)
+    if end_node < n:  # real node (depot on a closed tour); dummy end node is dropped
+        order_idx.append(end_node)
+
+    total = sum(matrix[a, b] for a, b in zip(order_idx[:-1], order_idx[1:]))
+    return total, order_idx
 
 
 # ---------- Solve & Write ----------
 def solve_and_write_cluster_ors(client, depot_row, stops_df, out_dir, cluster_tag,
                                 profile="driving-car", metric="duration",
                                 preference="fastest", return_to_depot=True,
-                                avoid_options=None, per_leg_sleep=0.2):
+                                avoid_options=None):
     os.makedirs(out_dir, exist_ok=True)
 
     # Assemble points: depot first + cluster stops
@@ -174,35 +228,16 @@ def solve_and_write_cluster_ors(client, depot_row, stops_df, out_dir, cluster_ta
 
     # TSP
     depot_idx = 0
-    if len(names) <= 11:
-        best_cost, order_idx = tsp_bruteforce(D, depot_idx, return_to_depot)
-    else:
-        best_cost, order_idx = tsp_2opt(D, depot_idx, return_to_depot)
+    best_cost, order_idx = tsp_ortools(D, depot_idx, return_to_depot)
 
-    # Per-leg directions (geometry + leg summaries)
-    leg_rows = []
-    geoms = []
-    total_m = 0.0; total_s = 0.0
-    for leg_i, (a_idx, b_idx) in enumerate(zip(order_idx[:-1], order_idx[1:]), start=1):
-        a = coords[a_idx]; b = coords[b_idx]
-        geom, leg_m, leg_s = ors_leg_geojson(
-            client, a, b, profile=profile, preference=preference,
-            extra_options=avoid_options
-        )
-        geoms.append(geom)
-        total_m += leg_m; total_s += leg_s
-        leg_rows.append({
-            "leg_index": leg_i,
-            "from_name": names[a_idx],
-            "to_name": names[b_idx],
-            "edge_m": leg_m,
-            "edge_s": leg_s,
-            "geometry": LineString([(x, y) for x, y in geom["coordinates"]])
-        })
-        if per_leg_sleep > 0:
-            time.sleep(per_leg_sleep)
-
-    legs_gdf = gpd.GeoDataFrame(leg_rows, geometry="geometry", crs=4326)
+    # Route geometry + per-leg summaries: one ORS Directions call for the whole
+    # ordered route, instead of one call per leg.
+    ordered_coords = [coords[i] for i in order_idx]
+    ordered_names = [names[i] for i in order_idx]
+    legs_gdf, total_m, total_s = ors_route_legs_geojson(
+        client, ordered_coords, ordered_names, profile=profile, preference=preference,
+        extra_options=avoid_options
+    )
     try:
         merged = linemerge(unary_union(legs_gdf.geometry.tolist()))
     except Exception:
@@ -258,7 +293,6 @@ def main():
                     help="optimize TSP by duration (fastest) or distance")
     ap.add_argument("--preference", choices=["fastest","shortest","recommended"], default="fastest")
     ap.add_argument("--avoid_tollways", action="store_true")
-    ap.add_argument("--sleep", type=float, default=0.2, help="seconds between per-leg directions calls")
     args = ap.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
@@ -304,7 +338,6 @@ def main():
             preference=args.preference,
             return_to_depot=(not args.no_return),
             avoid_options=avoid_opts,
-            per_leg_sleep=args.sleep
         )
         summary.append({"cluster": tag, "n_stops": len(stops),
                         "total_m": total_m, "total_km": total_m/1000.0,
